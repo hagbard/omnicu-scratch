@@ -1,10 +1,12 @@
 #![no_std]
 
-use core::str::Chars;
+use super::icu_str::IcuStr;
 
 pub enum Type {
   NFC, NFKC, NFD, NFKD
 }
+
+
 
 pub trait Normalizer {
   fn is_normalized(&self, t: Type) -> bool;
@@ -32,14 +34,10 @@ impl<'a, T> Normalizer for T where T: AsRef<&'a str> {
 
 impl Type {
   pub fn is_normalized(&self, s: &str) -> bool {
-    self.is_normalized_iter(&s.chars())
+    self.is_normalized_icu(&s)
   }
 
-  pub fn is_normalized_chars(&self, s: &Chars) -> bool {
-    self.is_normalized_iter(s)
-  }
-
-  pub fn is_normalized_iter(&self, s: &dyn Iterator<Item=char>) -> bool {
+  pub fn is_normalized_icu<T: Iterator<Item=(usize,char)>>(&self, s: &dyn IcuStr<Iter=T>) -> bool {
     match self {
       Type::NFC => is_nfc_normalized(s),
       Type::NFKC => false,
@@ -49,7 +47,8 @@ impl Type {
   }
 }
 
-fn is_nfc_normalized(s: &dyn Iterator<Item=char>) -> bool {
+fn is_nfc_normalized<T: Iterator<Item=(usize,char)>>(s: &dyn IcuStr<Iter=T>) -> bool {
+  s.icu_chars(0).for_each(|(i,c)| eprintln!("{:?}", c));
   true
 }
 
@@ -59,10 +58,10 @@ mod tests {
 
   #[test]
   fn is_nfc_normalized() {
-    // Not opting into the bound trait; only use "normailizer::Type".
+    // Not opting into the bound trait; only use "normalizer::Type".
     assert_eq!(Type::NFC.is_normalized(&"Hello World"), true);
 
-    // Using bound trait via "normailizer::Normalizer".
+    // Using bound trait via "normalizer::Normalizer".
     assert_eq!("Hello World".is_normalized(Type::NFC), true);
     assert_eq!("Hello World".chars().as_str().is_normalized(Type::NFC), true);
   }
