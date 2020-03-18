@@ -2,89 +2,56 @@ use std::str::CharIndices;
 
 // Alternate non generic: Box<dyn Iterator<Item=(usize, char)> + 'a>
 
-pub enum Utf16Type {
-  Normal(char),
-  HighSurrogate(u32),
-  LowSurrogate(u32),
-}
-
-fn as_utf16_type(v: u16) -> Utf16Type {
-  match v {
-    // Trap 8-bit values first (which have a safe no-op cast to char).
-    0x0000..=0x00FF => Utf16Type::Normal(v as u8 as char),
-    // Trap surrogate code values (non code points)
-    0xD800..=0xDBFF => Utf16Type::HighSurrogate(v as u32),
-    0xDC00..=0xDFFF => Utf16Type::LowSurrogate(v as u32),
-    // DON'T PANIC: Safe to "unwrap()" here since no longer a surrogate code value from above.
-    _ => Utf16Type::Normal(std::char::from_u32(v as u32).unwrap()),
-  }
-}
-
+/// Represents a `char` sequence without reference to an underlying encoding, intended for use by
+/// ICU functions.
+///
+/// ```rust
+/// "We 💖 🇷🇺🇸🇹".icu_chars(0).for_each(|(n, c)| println!("{:?}: {:?}", n, c));
+/// ```
+///
+/// The iterated offset `n` represents the offset in the underlying encoding of the start of the
+/// associated `char`. This value must only be used to "rewind" iteration by using it as input to
+/// `icu_chars()` function (for the same `IcuStrRef`). The rules for handling offsets are:
+///
+/// * The only constant offset which can be used safely to start an iteration is `0`
+/// * Offsets obtained during iteration are always relative to the start of that iteration (i.e.
+///   the first iterated code point always has an offset of `0`).
+/// * Offsets are unique in an iteration and always increase in value.
+/// * An offset within an iteration can be added to the starting offset of that iteration to obtain
+///   a new starting offset from that point (this permits code to store an offset in order to
+///   "rewind" iteration back to a known position later).
+///
+/// # Implementation Notes
+///
+/// This type exists in order to present a minimal API for accessing string data which is not tied
+/// to any specific underlying encoding and does not require data to be re-encoded or copied. It is
+/// implemented by a lightweight wrapper for `&str` and also for `UTF-16` encoded values in a
+/// `[u16]` (via the `utf16` module) and can easily be extended to support non-buffered data.
+///
+/// As such, this API does not support general purpose features for string handling and focusses
+/// only on providing the APIs necessary to implement ICU functionality (e.g. string normalization
+/// or comparison) in an efficient manner.
+///
+/// Public ICU methods designed for normal Rust usage should always accept `&str` or `T: AsRef<str>`
+/// rather than forcing callers to instantiate one of these (while this type is public, it is not
+/// intended as a way to manage string data in general Rust code).
 pub trait IcuStrRef<'a> {
   type Iter: Iterator<Item=(usize, char)>;
-  fn icu_chars(self, n: usize) -> Self::Iter;
+
+  /// Iterates over a sequence of `(offset, code point)` pairs starting from the specified offset
+  /// (which must either be `0` or an offset derived from a previous iteration).
+  ///
+  /// This function will `Panic` if the given starting offset is invalid.
+  // TODO: Consider making this return an Option or Result ??
+  fn icu_chars(self, start: usize) -> Self::Iter;
 }
 
+/// Binding of `IcuStrRef` for string-like Rust types.
 impl<'a, T: AsRef<str>> IcuStrRef<'a> for &'a T {
   type Iter = std::str::CharIndices<'a>;
 
-  fn icu_chars(self, n: usize) -> Self::Iter {
-    self.as_ref()[n..].char_indices()
-  }
-}
-
-pub struct Utf16CharIndices<'a> {
-  utf16: &'a [u16],
-  n: usize,
-}
-
-impl<'a> Utf16CharIndices<'a> {
-  // Decode the next char from the UTF-16 sequence, updating internal state accordingly.
-  // The caller must have already checked that we are not already at the end of the sequence
-  // (so this must be a private method).
-  fn decode_next_utf16(&mut self) -> char {
-    // DON'T PANIC: n < len from explicit caller check in Utf16CharIndices.
-    let v = self.utf16[self.n];
-    self.n += 1;
-    match as_utf16_type(v) {
-      Utf16Type::Normal(c) => c,
-      Utf16Type::HighSurrogate(hi) if self.n < self.utf16.len() => {
-        // DON'T PANIC: n < len from above match guard.
-        match as_utf16_type(self.utf16[self.n]) {
-          Utf16Type::LowSurrogate(lo) => {
-            self.n += 1;
-            // DON'T PANIC: This should always produce a valid code point from a surrogate pair.
-            // https://en.wikipedia.org/wiki/UTF-16
-            std::char::from_u32(((hi - 0xD800) << 10) + (lo - 0xDC00) + 0x10000).unwrap()
-          }
-          // High surrogate not followed by a low surrogate.
-          _ => std::char::REPLACEMENT_CHARACTER,
-        }
-      }
-      // Low surrogate, or high surrogate at end of range.
-      _ => std::char::REPLACEMENT_CHARACTER,
-    }
-  }
-}
-
-impl<'a> Iterator for Utf16CharIndices<'a> {
-  type Item = (usize, char);
-
-  fn next(&mut self) -> Option<Self::Item> {
-    if self.n < self.utf16.len() {
-      Some((self.n, self.decode_next_utf16()))
-    } else {
-      None
-    }
-  }
-}
-
-impl<'a> IcuStrRef<'a> for &'a [u16] {
-  type Iter = Utf16CharIndices<'a>;
-
-  fn icu_chars(self, n: usize) -> Self::Iter {
-    // !!! MUST NOT ALLOW SPLIT BETWEEN SURROGATE PAIRS !!!
-    Utf16CharIndices { utf16: &self[n..], n: 0 }
+  fn icu_chars(self, start: usize) -> Self::Iter {
+    self.as_ref()[start..].char_indices()
   }
 }
 
@@ -93,14 +60,45 @@ mod tests {
   use super::IcuStrRef;
 
   #[test]
-  fn do_stuff() {
-    &"abcdef".icu_chars(2).for_each(|(n, c)| println!("{:?}", c));
+  fn ascii_only() {
+    let out: Vec<(usize, char)> = "ABCDE".icu_chars(0).collect();
+    assert_eq!(out, vec!((0, 'A'), (1, 'B'), (2, 'C'), (3, 'D'), (4, 'E')));
   }
 
   #[test]
-  fn do_stuff_utf16() {
-    let v: Vec<u16> = vec!(65, 66, 67, 68, 69, 0xD801, 0xDC37, 0xD852, 0xDF62, 0xDC37, 0xD801);
-    v.as_slice().icu_chars(2).for_each(|(n, c)| println!("{:?}", c));
-    assert!(false)
+  fn multi_byte() {
+    // UTF-8 chars obtained from: https://en.wikipedia.org/wiki/UTF-8#Examples (1,2,3 & 4 bytes)
+    let out: Vec<(usize, char)> = "[$¢€𐍈]".icu_chars(0).collect();
+    assert_eq!(out, vec!((0, '['), (1, '$'), (2, '¢'), (4, '€'), (7, '𐍈'), (11, ']')));
+  }
+
+  #[test]
+  fn relative_offset() {
+    let out: Vec<(usize, char)> = "💖🇷🇺🇸🇹".icu_chars(8).collect();
+    assert_eq!(out, vec!((0, '🇺'), (4, '🇸'), (8, '🇹')));
+  }
+
+  #[test]
+  fn empty() {
+    let out: Vec<(usize, char)> = "".icu_chars(0).collect();
+    assert_eq!(out, vec!());
+  }
+
+  #[test]
+  fn start_at_end() {
+    let out: Vec<(usize, char)> = "💖🇷🇺🇸🇹".icu_chars(20).collect();
+    assert_eq!(out, vec!());
+  }
+
+  #[test]
+  #[should_panic]
+  fn bad_index() {
+    "💖".icu_chars(2);
+  }
+
+  #[test]
+  #[should_panic]
+  fn bad_index_oob() {
+    "💖".icu_chars(5);
   }
 }
