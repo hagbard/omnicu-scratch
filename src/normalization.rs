@@ -1,12 +1,10 @@
 #![no_std]
 
-use super::icu_str::IcuStr;
+use super::icu_str::IcuStrRef;
 
 pub enum Type {
   NFC, NFKC, NFD, NFKD
 }
-
-
 
 pub trait Normalizer {
   fn is_normalized(&self, t: Type) -> bool;
@@ -26,9 +24,9 @@ impl Normalizer for str {
 // struct is typically transient and not passed around or stored much (so any caller is expected
 // to naturally have the 'str' available anyway). In the worst case, a caller with only a 'Chars'
 // instance can just use 'as_str()' anyway:
-impl<'a, T> Normalizer for T where T: AsRef<&'a str> {
+impl<'a, T: AsRef<str>> Normalizer for T {
   fn is_normalized(&self, t: Type) -> bool {
-    t.is_normalized(self.as_ref())
+    t.is_normalized_icu(&self)
   }
 }
 
@@ -37,7 +35,7 @@ impl Type {
     self.is_normalized_icu(&s)
   }
 
-  pub fn is_normalized_icu<T: Iterator<Item=(usize,char)>>(&self, s: &dyn IcuStr<Iter=T>) -> bool {
+  pub fn is_normalized_icu<'a>(&self, s: impl IcuStrRef<'a>) -> bool {
     match self {
       Type::NFC => is_nfc_normalized(s),
       Type::NFKC => false,
@@ -47,7 +45,7 @@ impl Type {
   }
 }
 
-fn is_nfc_normalized<T: Iterator<Item=(usize,char)>>(s: &dyn IcuStr<Iter=T>) -> bool {
+fn is_nfc_normalized<'a>(s: impl IcuStrRef<'a>) -> bool {
   s.icu_chars(0).for_each(|(i,c)| eprintln!("{:?}", c));
   true
 }
