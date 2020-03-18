@@ -1,0 +1,7 @@
+[package]
+name = "OmnICU-Rust"
+version = "0.1.0"
+authors = ["dbeaumont"]
+edition = "2018"
+
+[dependencies]
