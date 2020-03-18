@@ -14,6 +14,11 @@ impl<'a> IcuStrRef<'a> for &'a [u16] {
   type Iter = Utf16CharIndices<'a>;
 
   fn icu_chars(self, n: usize) -> Self::Iter {
+    // Similarly to `[n..]` on `&str` we want to avoid anyone splitting UTF-16 data inside a
+    // surrogate pair. If this were allowed then you could get different results for a string
+    // depending on how you iterated it (e.g. as one string or as two sub-strings) because the
+    // surrogate pair would appear as .
+    //
     // This will also panic "naturally" if the index is too big when the element is read.
     if (n > 0)
         && (self.len() > 1)
@@ -106,7 +111,7 @@ mod tests {
   #[test]
   fn bmp_only() {
     let v: Vec<u16> = vec!(65, 66, 67, 68, 69);
-    let out: Vec<(usize, char)> = v.as_slice().icu_chars(0).collect();
+    let out: Vec<(usize, char)> = v.icu_chars(0).collect();
     assert_eq!(out, vec!((0, 'A'), (1, 'B'), (2, 'C'), (3, 'D'), (4, 'E')));
   }
 
@@ -114,42 +119,70 @@ mod tests {
   fn surrogate_pairs() {
     // UTF-16 values obtained from: https://en.wikipedia.org/wiki/UTF-16#Examples
     let v: Vec<u16> = vec!(0x5B, 0xD801, 0xDC37, 0xD852, 0xDF62, 0x5D);
-    let out: Vec<(usize, char)> = v.as_slice().icu_chars(0).collect();
+    let out: Vec<(usize, char)> = v.icu_chars(0).collect();
     assert_eq!(out, vec!((0, '['), (1, '𐐷'), (3, '𤭢'), (5, ']')));
+  }
+
+  #[test]
+  fn surrogate_pairs_unpaired_high() {
+    let v: Vec<u16> = vec!(0x5B, 0xD801, 0x5D);
+    let out: Vec<(usize, char)> = v.icu_chars(0).collect();
+    assert_eq!(out, vec!((0, '['), (1, '�'), (2, ']')));
+  }
+
+  #[test]
+  fn surrogate_pairs_trailing_high() {
+    let v: Vec<u16> = vec!(0x5B, 0xD801);
+    let out: Vec<(usize, char)> = v.icu_chars(0).collect();
+    assert_eq!(out, vec!((0, '['), (1, '�')));
+  }
+
+  #[test]
+  fn surrogate_pairs_unpaired_low() {
+    let v: Vec<u16> = vec!(0x5B, 0xDC37, 0x5D);
+    let out: Vec<(usize, char)> = v.icu_chars(0).collect();
+    assert_eq!(out, vec!((0, '['), (1, '�'), (2, ']')));
+  }
+
+  #[test]
+  fn surrogate_pairs_trailing_low() {
+    let v: Vec<u16> = vec!(0x5B, 0xDC37);
+    let out: Vec<(usize, char)> = v.icu_chars(0).collect();
+    assert_eq!(out, vec!((0, '['), (1, '�')));
   }
 
   #[test]
   fn relative_offset() {
     let v: Vec<u16> = vec!(65, 66, 67, 68, 69);
-    let out: Vec<(usize, char)> = v.as_slice().icu_chars(2).collect();
+    let out: Vec<(usize, char)> = v.icu_chars(2).collect();
     assert_eq!(out, vec!((0, 'C'), (1, 'D'), (2, 'E')));
   }
 
   #[test]
   fn empty() {
     let v: Vec<u16> = vec!();
-    let out: Vec<(usize, char)> = v.as_slice().icu_chars(0).collect();
+    let out: Vec<(usize, char)> = v.icu_chars(0).collect();
     assert_eq!(out, vec!());
   }
 
   #[test]
   fn start_at_end() {
     let v: Vec<u16> = vec!(65, 66, 67, 68, 69);
-    let out: Vec<(usize, char)> = v.as_slice().icu_chars(5).collect();
+    let out: Vec<(usize, char)> = v.icu_chars(5).collect();
     assert_eq!(out, vec!());
   }
 
   #[test]
   #[should_panic]
   fn bad_index() {
-    let v: Vec<u16> = vec!(0xD801, 0xDC37);
-    v.as_slice().icu_chars(1);
+    let v: Vec<u16> = vec!(0x5B, 0xD801, 0xDC37, 0x5D);
+    v.icu_chars(2);
   }
 
   #[test]
   #[should_panic]
   fn bad_index_oob() {
     let v: Vec<u16> = vec!(65, 66, 67, 68, 69);
-    v.as_slice().icu_chars(6);
+    v.icu_chars(6);
   }
 }
