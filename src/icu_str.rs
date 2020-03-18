@@ -5,8 +5,9 @@ use std::str::CharIndices;
 /// Represents a `char` sequence without reference to an underlying encoding, intended for use by
 /// ICU functions.
 ///
-/// ```rust
-/// "We 💖 🇷🇺🇸🇹".icu_chars(0).for_each(|(n, c)| println!("{:?}: {:?}", n, c));
+/// ```
+/// let v: Vec<(usize, char)> = "I💖🇷🇺🇸🇹".icu_chars(0).collect();
+/// assert_eq!(v, vec!((0, 'I'), (1, '💖'), (5, '🇷'), (9, '🇺'), (13, '🇸'), (17, '🇹')))
 /// ```
 ///
 /// The iterated offset `n` represents the offset in the underlying encoding of the start of the
