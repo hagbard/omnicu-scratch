@@ -39,8 +39,8 @@ use std::str::CharIndices;
 pub trait IcuStrRef<'a> {
   type Iter: Iterator<Item=(usize, char)>;
 
-  /// Iterates over a sequence of `(offset, code point)` pairs starting from the specified offset
-  /// (which must either be `0` or an offset derived from a previous iteration).
+  /// Iterates over a sequence of `(offset, code point)` pairs starting from the specified `start`
+  /// offset (which must either be `0` or an offset derived from a previous iteration).
   ///
   /// This function will `Panic` if the given starting offset is invalid.
   // TODO: Consider making this return an Option or Result ??
