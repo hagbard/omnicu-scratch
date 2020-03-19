@@ -16,10 +16,23 @@ impl<'a> IcuStrRef<'a> for &'a [u16] {
   fn icu_chars(self, n: usize) -> Self::Iter {
     // Similarly to `[n..]` on `&str` we want to avoid anyone splitting UTF-16 data inside a
     // surrogate pair. If this were allowed then you could get different results for a string
-    // depending on how you iterated it (e.g. as one string or as two sub-strings) because the
-    // surrogate pair would appear as .
+    // depending on how you iterated it (e.g. as one string or as two sub-strings).
     //
-    // This will also panic "naturally" if the index is too big when the element is read.
+    //            /- surrogate -\
+    // vec!(0x5B, 0xD801, 0xDC37, 0x5D).icu_chars(0) --> (0, 'a'), (1, '𐐷'), (3, 'b')
+    // vec!(0x5B, 0xD801, 0xDC37, 0x5D).icu_chars(2) --> (0, '�'), (1, 'b')
+    //
+    // Note that we *allow* splitting of any other (invalid) combination of surrogates since each
+    // of these turns into a single '�' (replacement character) anyway, so it's fine to treat them
+    // the same as non-surrogates.
+    //
+    // Obviously we cannot prevent anyone constructing the UTF-16 data from messing it up though,
+    // so we only allow the code to "panic" in cases where the immediate caller is in complete
+    // control of whether it can occur (i.e. this will never panic if valid offsets obtained from
+    // a prior iteration are passed in).
+    //
+    // This will also panic "naturally" if the index is too big when the element is read, which is
+    // also something that would never happen if the caller uses offsets correctly.
     if (n > 0)
         && (self.len() > 1)
         && is_enum!(as_utf16_type(self[n - 1]), Utf16Type::HighSurrogate(_))

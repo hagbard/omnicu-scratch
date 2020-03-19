@@ -19,8 +19,8 @@ use std::str::CharIndices;
 ///   the first iterated code point always has an offset of `0`).
 /// * Offsets are unique in an iteration and always increase in value.
 /// * An offset within an iteration can be added to the starting offset of that iteration to obtain
-///   a new starting offset from that point (this permits code to store an offset in order to
-///   "rewind" iteration back to a known position later).
+///   a new starting offset from that point (this permits calling code to store an offset in order
+///   to "rewind" iteration back to a known position later).
 ///
 /// # Implementation Notes
 ///
